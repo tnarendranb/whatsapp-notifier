@@ -1,6 +1,6 @@
 import os
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from twilio.rest import Client
 from github import Github
 
@@ -12,18 +12,18 @@ REPO_NAME = os.environ.get("GITHUB_REPOSITORY")
 
 RECIPIENT_WHATSAPP_NUMBER = 'whatsapp:+918886160680'
 TWILIO_WHATSAPP_NUMBER = 'whatsapp:+14155238886'
-WEBSITE_URL = 'https://www.thissitedoesnotexist12345.com/'
+# --- Set this to the real website when you are done testing ---
+WEBSITE_URL = 'https://www.apollohospitals.com/' 
 DOWNTIME_ISSUE_TITLE = "Automated Alert: Website is DOWN"
 # --- End of Configuration ---
 
 def check_website_status(url):
     """Checks a single website's status and returns True if up, False if down."""
     try:
-        # --- FIX: Add a User-Agent header to mimic a real browser ---
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        response = requests.get(url, timeout=10, headers=headers) # Pass the headers here
+        response = requests.get(url, timeout=10, headers=headers)
         
         if 200 <= response.status_code < 300:
             print(f"✅ Website {url} is UP.")
@@ -85,38 +85,50 @@ if __name__ == "__main__":
         is_up_now = check_website_status(WEBSITE_URL)
         downtime_issue = manage_downtime_issue(repo)
         
+        ist_offset = timedelta(hours=5, minutes=30)
+        
         if is_up_now:
             if downtime_issue:
                 print("Site is back UP. Resolving the issue.")
-                down_at = downtime_issue.created_at
-                up_at = datetime.now(timezone.utc)
-                total_downtime = up_at - down_at
+                down_at_utc = downtime_issue.created_at
+                up_at_utc = datetime.now(timezone.utc)
+                total_downtime = up_at_utc - down_at_utc
                 
+                # --- NEW: Convert both times to IST for the message ---
+                down_at_ist = down_at_utc + ist_offset
+                up_at_ist = up_at_utc + ist_offset
+                
+                # --- UPDATED RECOVERY MESSAGE ---
                 recovery_message = (
                     f"✅ **Server is UP!** ✅\n\n"
                     f"Website: {WEBSITE_URL}\n"
                     f"Status: **Back Online**\n\n"
-                    f"Recovered at: *{up_at.strftime('%Y-%m-%d %H:%M:%S UTC')}*\n"
+                    f"The server went down at: *{down_at_ist.strftime('%Y-%m-%d %H:%M:%S IST')}*\n"
+                    f"The server came back up at: *{up_at_ist.strftime('%Y-%m-%d %H:%M:%S IST')}*\n\n"
                     f"Total Downtime: *{format_downtime(total_downtime.total_seconds())}*"
                 )
                 
                 send_whatsapp_notification(recovery_message)
-                downtime_issue.create_comment(f"Resolved: Site came back online at {up_at.strftime('%Y-%m-%d %H:%M:%S UTC')}.")
+                downtime_issue.create_comment(f"Resolved: Site came back online at {up_at_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}.")
                 downtime_issue.edit(state='closed')
                 print(f"Closed issue #{downtime_issue.number}.")
         else: # Site is DOWN
             if not downtime_issue:
                 print("Site is DOWN. Creating a new issue and sending notification.")
+                
+                now_utc = datetime.now(timezone.utc)
+                now_ist = now_utc + ist_offset
+                
                 down_message = (
                     f"🚨 **Server is DOWN!** 🚨\n\n"
                     f"Website: {WEBSITE_URL}\n"
                     f"Status: **Not Responding**\n\n"
-                    f"Time of failure: *{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}*"
+                    f"Time of failure: *{now_ist.strftime('%Y-%m-%d %H:%M:%S IST')}*"
                 )
                 send_whatsapp_notification(down_message)
                 repo.create_issue(
                     title=DOWNTIME_ISSUE_TITLE,
-                    body=f"The monitor detected that {WEBSITE_URL} went down at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}."
+                    body=f"The monitor detected that {WEBSITE_URL} went down at {now_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}."
                 )
                 print("Created a new GitHub issue.")
             else:
