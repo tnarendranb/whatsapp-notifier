@@ -12,7 +12,7 @@ REPO_NAME = os.environ.get("GITHUB_REPOSITORY")
 
 RECIPIENT_WHATSAPP_NUMBER = 'whatsapp:+918886160680'
 TWILIO_WHATSAPP_NUMBER = 'whatsapp:+14155238886'
-WEBSITE_URL = 'https://www.apollohospitals.com/'
+WEBSITE_URL = 'https://www.thissitedoesnotexist12345.com/'
 DOWNTIME_ISSUE_TITLE = "Automated Alert: Website is DOWN"
 # --- End of Configuration ---
 
