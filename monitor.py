@@ -12,28 +12,39 @@ REPO_NAME = os.environ.get("GITHUB_REPOSITORY")
 
 RECIPIENT_WHATSAPP_NUMBER = 'whatsapp:+918886160680'
 TWILIO_WHATSAPP_NUMBER = 'whatsapp:+14155238886'
-# --- Set this to the real website when you are done testing ---
-WEBSITE_URL = 'https://www.apollohospitals.com/' 
-DOWNTIME_ISSUE_TITLE = "Automated Alert: Website is DOWN"
+
+# --- NEW: List of critical URLs to check ---
+# The script will consider the site "down" if ANY of these fail.
+WEBSITES_TO_CHECK = [
+    'https://www.apollohospitals.com/',
+    'https://www.apollohospitals.com/doctors/',
+    'https://www.apollohospitals.com/health-library',
+    'https://www.apollohospitals.com/centres-of-excellence'                
+]
+DOWNTIME_ISSUE_TITLE = "Automated Alert: A Website Page is DOWN"
 # --- End of Configuration ---
 
-def check_website_status(url):
-    """Checks a single website's status and returns True if up, False if down."""
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(url, timeout=10, headers=headers)
-        
-        if 200 <= response.status_code < 300:
-            print(f"✅ Website {url} is UP.")
-            return True
-        else:
-            print(f"🚨 Website {url} is DOWN. Status code: {response.status_code}")
-            return False
-    except requests.exceptions.RequestException as e:
-        print(f"🚨 Website {url} is DOWN. Error: {e}")
-        return False
+def check_system_status(urls):
+    """
+    Checks a list of URLs. Returns (True, None) if all are up.
+    Returns (False, failing_url) if any URL is down.
+    """
+    for url in urls:
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            response = requests.get(url, timeout=10, headers=headers)
+            
+            if not (200 <= response.status_code < 300):
+                print(f"🚨 Page is DOWN: {url} (Status code: {response.status_code})")
+                return (False, url) # Return the failing URL
+        except requests.exceptions.RequestException as e:
+            print(f"🚨 Page is DOWN: {url} (Error: {e})")
+            return (False, url) # Return the failing URL
+    
+    print("✅ All monitored pages are UP.")
+    return (True, None) # All URLs were successful
 
 def send_whatsapp_notification(message_body):
     """Sends a WhatsApp message via Twilio."""
@@ -82,54 +93,51 @@ if __name__ == "__main__":
         g = Github(GITHUB_TOKEN)
         repo = g.get_repo(REPO_NAME)
         
-        is_up_now = check_website_status(WEBSITE_URL)
+        is_all_up, failing_url = check_system_status(WEBSITES_TO_CHECK)
         downtime_issue = manage_downtime_issue(repo)
         
         ist_offset = timedelta(hours=5, minutes=30)
         
-        if is_up_now:
+        if is_all_up:
             if downtime_issue:
-                print("Site is back UP. Resolving the issue.")
+                print("System is back online. Resolving the issue.")
                 down_at_utc = downtime_issue.created_at
                 up_at_utc = datetime.now(timezone.utc)
                 total_downtime = up_at_utc - down_at_utc
                 
-                # --- NEW: Convert both times to IST for the message ---
                 down_at_ist = down_at_utc + ist_offset
                 up_at_ist = up_at_utc + ist_offset
                 
-                # --- UPDATED RECOVERY MESSAGE ---
                 recovery_message = (
-                    f"✅ **Server is UP!** ✅\n\n"
-                    f"Website: {WEBSITE_URL}\n"
-                    f"Status: **Back Online**\n\n"
-                    f"The server went down at: *{down_at_ist.strftime('%Y-%m-%d %H:%M:%S IST')}*\n"
-                    f"The server came back up at: *{up_at_ist.strftime('%Y-%m-%d %H:%M:%S IST')}*\n\n"
+                    f"✅ **System is UP!** ✅\n\n"
+                    f"All monitored pages are now online.\n\n"
+                    f"The system first went down at: *{down_at_ist.strftime('%Y-%m-%d %H:%M:%S IST')}*\n"
+                    f"The system recovered at: *{up_at_ist.strftime('%Y-%m-%d %H:%M:%S IST')}*\n\n"
                     f"Total Downtime: *{format_downtime(total_downtime.total_seconds())}*"
                 )
                 
                 send_whatsapp_notification(recovery_message)
-                downtime_issue.create_comment(f"Resolved: Site came back online at {up_at_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}.")
+                downtime_issue.create_comment(f"Resolved: The system came back online at {up_at_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}.")
                 downtime_issue.edit(state='closed')
                 print(f"Closed issue #{downtime_issue.number}.")
-        else: # Site is DOWN
+        else: # At least one page is DOWN
             if not downtime_issue:
-                print("Site is DOWN. Creating a new issue and sending notification.")
+                print("A page is DOWN. Creating a new issue and sending notification.")
                 
                 now_utc = datetime.now(timezone.utc)
                 now_ist = now_utc + ist_offset
                 
+                # --- NEW: The "down" message now specifies the failing URL ---
                 down_message = (
-                    f"🚨 **Server is DOWN!** 🚨\n\n"
-                    f"Website: {WEBSITE_URL}\n"
-                    f"Status: **Not Responding**\n\n"
+                    f"🚨 **Website Page is DOWN!** 🚨\n\n"
+                    f"The following page is not responding:\n*{failing_url}*\n\n"
                     f"Time of failure: *{now_ist.strftime('%Y-%m-%d %H:%M:%S IST')}*"
                 )
                 send_whatsapp_notification(down_message)
                 repo.create_issue(
                     title=DOWNTIME_ISSUE_TITLE,
-                    body=f"The monitor detected that {WEBSITE_URL} went down at {now_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}."
+                    body=f"The monitor detected that the page `{failing_url}` went down at {now_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}."
                 )
                 print("Created a new GitHub issue.")
             else:
-                print("Site is still down. No new notification needed.")
+                print("System is still down. No new notification needed.")
